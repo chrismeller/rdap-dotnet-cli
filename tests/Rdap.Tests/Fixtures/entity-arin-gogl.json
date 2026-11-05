@@ -1,0 +1,10 @@
+{
+  "rdapConformance": ["nro_rdap_profile_0", "rdap_level_0"],
+  "handle": "GOGL",
+  "vcardArray": ["vcard", [["version", {}, "text", "4.0"], ["fn", {}, "text", "Google LLC"], ["kind", {}, "text", "org"]]],
+  "roles": ["registrant"],
+  "networks": [{"handle": "NET-8-8-8-0-2", "startAddress": "8.8.8.0", "endAddress": "8.8.8.255", "ipVersion": "v4", "objectClassName": "ip network"}],
+  "autnums": [{"handle": "AS15169", "startAutnum": 15169, "endAutnum": 15169, "name": "GOOGLE", "objectClassName": "autnum"}],
+  "objectClassName": "entity",
+  "port43": "whois.arin.net"
+}

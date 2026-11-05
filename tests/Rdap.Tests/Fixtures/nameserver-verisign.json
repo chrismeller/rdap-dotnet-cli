@@ -1,0 +1,9 @@
+{
+  "objectClassName": "nameserver",
+  "handle": "2138514_NS1_GOOGLE_COM-VRSN",
+  "ldhName": "NS1.GOOGLE.COM",
+  "ipAddresses": {"v4": ["216.239.32.10"], "v6": ["2001:4860:4802:32::a"]},
+  "status": ["active"],
+  "events": [{"eventAction": "last update of RDAP database", "eventDate": "2026-11-05T06:00:00Z"}],
+  "rdapConformance": ["rdap_level_0"]
+}

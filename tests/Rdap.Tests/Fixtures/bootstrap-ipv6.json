@@ -1,0 +1,9 @@
+{
+  "description": "RDAP bootstrap file for IPv6 address allocations (test subset)",
+  "publication": "2026-10-01T00:00:00Z",
+  "services": [
+    [["2001:4800::/23", "2600::/12"], ["https://rdap.arin.net/registry/"]],
+    [["2001:600::/23"], ["https://rdap.db.ripe.net/"]]
+  ],
+  "version": "1.0"
+}
