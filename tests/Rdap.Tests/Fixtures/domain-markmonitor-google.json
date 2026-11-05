@@ -1,0 +1,52 @@
+{
+  "objectClassName": "domain",
+  "lang": "en",
+  "handle": "2138514_DOMAIN_COM-VRSN",
+  "ldhName": "google.com",
+  "unicodeName": "google.com",
+  "status": ["client update prohibited", "client transfer prohibited", "client delete prohibited", "server update prohibited", "server transfer prohibited", "server delete prohibited"],
+  "nameservers": [
+    {"objectClassName": "nameserver", "ldhName": "ns1.google.com"},
+    {"objectClassName": "nameserver", "ldhName": "ns2.google.com"}
+  ],
+  "secureDNS": {"delegationSigned": false, "zoneSigned": false},
+  "events": [
+    {"eventAction": "expiration", "eventDate": "2028-09-13T07:00:00.000+00:00"},
+    {"eventAction": "registration", "eventDate": "1997-09-15T07:00:00.000+00:00"},
+    {"eventAction": "last changed", "eventDate": "2019-09-09T15:39:04.000+00:00"}
+  ],
+  "entities": [
+    {
+      "objectClassName": "entity",
+      "handle": "292",
+      "roles": ["registrar"],
+      "publicIds": [{"type": "IANA Registrar ID", "identifier": "292"}],
+      "vcardArray": ["vcard", [["version", {}, "text", "4.0"], ["fn", {}, "text", "MarkMonitor Inc."], ["adr", {}, "text", ["", "", "3540 East Longwing Lane, Suite 300", "Meridian", "ID", "83646", "US"]]]]
+    },
+    {
+      "objectClassName": "entity",
+      "handle": "",
+      "roles": ["registrant"],
+      "vcardArray": ["vcard", [
+        ["version", {}, "text", "4.0"],
+        ["fn", {}, "text", ""],
+        ["org", {}, "text", "Google LLC"],
+        ["adr", {"cc": "US"}, "text", {"label": ""}],
+        ["adr", {"label": "CA\nUS"}, "text", ["", "", "", "", "", "", ""]],
+        ["email", {}, "text", "Select Request Email Form at https://domains.markmonitor.com/whois/google.com"]
+      ]],
+      "remarks": [{"title": "REDACTED FOR PRIVACY", "type": "object redacted due to authorization", "description": ["Some of the data in this object has been removed."]}]
+    },
+    {
+      "objectClassName": "entity",
+      "roles": ["technical"],
+      "vcardArray": ["vcard", [["version", {}, "text", "4.0"], ["fn", {}, "text", ""], ["org", {}, "text", "Google LLC"], ["tel", {"type": ["voice", "work"]}, "uri", "tel:+1.6502530000"], ["tel", {"type": "fax"}, "uri", "tel:+1.6502530001"]]]
+    }
+  ],
+  "redacted": [
+    {"name": {"type": "Registrant Name"}, "prePath": "$.entities[?(@.roles[0]=='registrant')].vcardArray[1][?(@[0]=='fn')][3]", "pathLang": "jsonpath", "method": "emptyValue", "reason": {"type": "Server policy"}},
+    {"name": {"description": "Registrant Street"}, "method": "removal"}
+  ],
+  "rdapConformance": ["rdap_level_0", "redacted", "icann_rdap_response_profile_1"],
+  "notices": [{"title": "Terms of Service", "description": ["By submitting an RDAP query, you agree to the terms."]}]
+}

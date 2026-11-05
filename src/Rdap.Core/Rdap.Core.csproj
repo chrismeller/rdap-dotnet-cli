@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Rdap</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>RDAP (RFC 9082/9083) client with IANA bootstrap support.</Description>
+    <!-- Set to true in release CI so a build without the embedded IANA snapshot fails loudly. -->
+    <RdapRequireBootstrapSnapshot Condition="'$(RdapRequireBootstrapSnapshot)' == ''">false</RdapRequireBootstrapSnapshot>
+    <RdapBootstrapContinueOnError>true</RdapBootstrapContinueOnError>
+    <RdapBootstrapContinueOnError Condition="'$(RdapRequireBootstrapSnapshot)' == 'true'">false</RdapBootstrapContinueOnError>
+    <RdapBootstrapDataDir>$(MSBuildThisFileDirectory)Bootstrap/Data/</RdapBootstrapDataDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Rdap.Tests" />
+    <RdapBootstrapFile Include="dns;ipv4;ipv6;asn;object-tags" />
+  </ItemGroup>
+
+  <!--
+    The IANA bootstrap registries are embedded as an offline fallback. They are downloaded at
+    build time (if missing) rather than committed, so every release ships a fresh snapshot.
+    A build without network access still succeeds; the CLI then relies on the live/cached copy.
+  -->
+  <Target Name="DownloadRdapBootstrap" BeforeTargets="BeforeBuild"
+          Condition="!Exists('$(RdapBootstrapDataDir)dns.json') Or !Exists('$(RdapBootstrapDataDir)object-tags.json')">
+    <DownloadFile SourceUrl="https://data.iana.org/rdap/%(RdapBootstrapFile.Identity).json"
+                  DestinationFolder="$(RdapBootstrapDataDir)"
+                  Retries="2"
+                  ContinueOnError="$(RdapBootstrapContinueOnError)" />
+  </Target>
+
+  <Target Name="EmbedRdapBootstrap" AfterTargets="DownloadRdapBootstrap" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(RdapRequireBootstrapSnapshot)' == 'true' And !Exists('$(RdapBootstrapDataDir)%(RdapBootstrapFile.Identity).json')"
+           Text="IANA bootstrap snapshot %(RdapBootstrapFile.Identity).json is missing." />
+    <ItemGroup>
+      <EmbeddedResource Include="$(RdapBootstrapDataDir)%(RdapBootstrapFile.Identity).json"
+                        Condition="Exists('$(RdapBootstrapDataDir)%(RdapBootstrapFile.Identity).json')"
+                        LogicalName="Rdap.Bootstrap.%(RdapBootstrapFile.Identity).json" />
+    </ItemGroup>
+  </Target>
+
+</Project>

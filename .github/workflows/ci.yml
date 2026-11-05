@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  # Daily run of the live tests, to catch registries changing their response formats.
+  # (Scheduled runs only fire on the default branch.)
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Unit tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - run: dotnet build rdap.slnx -c Release -p:RdapRequireBootstrapSnapshot=true
+      - run: dotnet test --project tests/Rdap.Tests -c Release --no-build
+
+  integration:
+    name: Live integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - run: dotnet build tests/Rdap.IntegrationTests -c Release
+      - run: dotnet test --project tests/Rdap.IntegrationTests -c Release --no-build
+
+  publish:
+    name: Publish ${{ matrix.rid }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux binaries are built on 22.04 so they run on glibc 2.35+ (not just the newest distros).
+          - rid: linux-x64
+            os: ubuntu-22.04
+          - rid: linux-arm64
+            os: ubuntu-22.04-arm
+          - rid: win-x64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Install Native AOT prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish (Native AOT)
+        run: >
+          dotnet publish src/Rdap.Cli -c Release -r ${{ matrix.rid }} -o out
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:RdapRequireBootstrapSnapshot=true
+
+      # Exercise the real AOT binary: trimming/AOT problems only show up here, not in `dotnet test`.
+      - name: Smoke test
+        run: |
+          bin=./out/rdap
+          [[ "$RUNNER_OS" == Windows ]] && bin=./out/rdap.exe
+          ls -la out
+          "$bin" --version
+          retry() { for i in 1 2 3; do "$@" && return 0; sleep $((i * 5)); done; return 1; }
+          retry "$bin" --no-color google.com
+          retry "$bin" --no-color 8.8.8.8
+          retry "$bin" --json AS3333 > /dev/null
+          set +e; "$bin" "rdap-dotnet-cli-smoke-$RANDOM$RANDOM.com"; code=$?; set -e
+          [[ $code -eq 1 ]] || { echo "expected exit 1 for not-found, got $code"; exit 1; }
+
+      - name: Package
+        id: package
+        run: |
+          name="rdap-${{ steps.version.outputs.version }}-${{ matrix.rid }}"
+          cp README.md LICENSE out/
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            (cd out && 7z a "../$name.zip" rdap.exe README.md LICENSE)
+            echo "file=$name.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar -czf "$name.tar.gz" -C out rdap README.md LICENSE
+            echo "file=$name.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: rdap-${{ matrix.rid }}
+          path: ${{ steps.package.outputs.file }}
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, integration, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
