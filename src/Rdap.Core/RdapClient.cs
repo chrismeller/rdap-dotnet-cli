@@ -147,7 +147,7 @@ public sealed class RdapClient
         TimeSpan? retryAfter = response.Headers.RetryAfter switch
         {
             { Delta: { } delta } => delta,
-            { Date: { } date } => date - DateTimeOffset.UtcNow,
+            { Date: { } date } => date > DateTimeOffset.UtcNow ? date - DateTimeOffset.UtcNow : TimeSpan.Zero, // a past or clock-skewed date means "now"
             _ => null,
         };
 

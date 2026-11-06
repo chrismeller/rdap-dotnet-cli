@@ -78,6 +78,25 @@ public class RdapClientTests
     }
 
     [Fact]
+    public async Task Rate_limit_with_past_retry_after_date_is_clamped_to_zero()
+    {
+        var handler = new FakeHandler().WithBootstrap().Respond("https://rdap.arin.net/registry/ip/8.8.8.8", () =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Content = new StringContent("") };
+            response.Headers.RetryAfter = new RetryConditionHeaderValue(DateTimeOffset.UtcNow.AddMinutes(-5));
+            return response;
+        });
+        var client = CreateClient(handler, out var http);
+        using (http)
+        {
+            var ex = await Assert.ThrowsAsync<RdapHttpException>(() => client.QueryAsync(RdapQuery.Parse("8.8.8.8"), cancellationToken: Ct));
+
+            Assert.Equal(TimeSpan.Zero, ex.RetryAfter);
+            Assert.Contains("retry after 0s", ex.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public async Task Unparseable_body_is_returned_with_parse_error()
     {
         var handler = new FakeHandler().WithBootstrap().Json("https://rdap.arin.net/registry/autnum/15169", """{"objectClassName":"autnum","events":"bad"}""");
