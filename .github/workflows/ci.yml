@@ -31,8 +31,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
       - run: dotnet build rdap.slnx -c Release -p:RdapRequireBootstrapSnapshot=true
@@ -42,8 +42,8 @@ jobs:
     name: Live integration tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
       - run: dotnet build tests/Rdap.IntegrationTests -c Release
@@ -65,8 +65,8 @@ jobs:
             os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -116,7 +116,7 @@ jobs:
             echo "file=$name.tar.gz" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: rdap-${{ matrix.rid }}
           path: ${{ steps.package.outputs.file }}
@@ -130,7 +130,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
