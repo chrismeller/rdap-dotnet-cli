@@ -1,0 +1,10 @@
+bin/
+obj/
+artifacts/
+TestResults/
+.vs/
+.idea/
+*.user
+
+# Downloaded at build time from data.iana.org (see src/Rdap.Core/Rdap.Core.csproj)
+src/Rdap.Core/Bootstrap/Data/

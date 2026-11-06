@@ -1,0 +1,19 @@
+{
+  "handle": "AS3333",
+  "name": "RIPE-NCC-AS",
+  "startAutnum": 3333,
+  "endAutnum": 3333,
+  "type": "DIRECT ALLOCATION",
+  "status": ["active"],
+  "objectClassName": "autnum",
+  "entities": [
+    {"handle": "ORG-RIEN1-RIPE", "roles": ["registrant"], "objectClassName": "entity", "links": [{"value": "https://rdap.db.ripe.net/autnum/3333", "rel": "self", "href": "https://rdap.db.ripe.net/entity/ORG-RIEN1-RIPE"}]},
+    {"handle": "GII-RIPE", "vcardArray": ["vcard", [["version", {}, "text", "4.0"], ["fn", {}, "text", "Guy Interno"], ["kind", {}, "text", "individual"], ["adr", {"label": "Stationsplein 11\n1012 AB\nAmsterdam\nNETHERLANDS"}, "text", null]]], "roles": ["administrative", "technical"], "objectClassName": "entity"}
+  ],
+  "remarks": [{"description": ["The RIPE NCC network"]}],
+  "events": [{"eventAction": "registration", "eventDate": "2002-09-12T13:44:30Z"}, {"eventAction": "last changed", "eventDate": "2024-02-12T13:42:58Z"}],
+  "links": [{"value": "https://rdap.db.ripe.net/autnum/3333", "rel": "self", "href": "https://rdap.db.ripe.net/autnum/3333"}],
+  "port43": "whois.ripe.net",
+  "rdapConformance": ["nro_rdap_profile_asn_flat_0", "cidr0", "rdap_level_0", "nro_rdap_profile_0", "redacted"],
+  "notices": [{"title": "Terms and Conditions", "description": ["This is the RIPE Database query service."]}]
+}

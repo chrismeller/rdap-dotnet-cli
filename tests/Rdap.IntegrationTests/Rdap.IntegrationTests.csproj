@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Live tests against real RDAP servers. They catch registries changing their response
+    formats (and us mis-parsing them), so CI runs them on every push and on a daily schedule.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Rdap.Core/Rdap.Core.csproj" />
+    <ProjectReference Include="../../src/Rdap.Cli/Rdap.Cli.csproj" />
+  </ItemGroup>
+
+</Project>

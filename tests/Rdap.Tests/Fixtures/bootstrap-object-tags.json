@@ -1,0 +1,9 @@
+{
+  "description": "RDAP bootstrap file for service provider object tags (test subset)",
+  "publication": "2026-10-01T00:00:00Z",
+  "services": [
+    [["contact@arin.net"], ["ARIN"], ["https://rdap.arin.net/registry/", "http://rdap.arin.net/registry/"]],
+    [["rdap@ripe.net"], ["RIPE"], ["https://rdap.db.ripe.net/"]]
+  ],
+  "version": "1.0"
+}

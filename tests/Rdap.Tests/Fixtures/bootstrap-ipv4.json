@@ -1,0 +1,10 @@
+{
+  "description": "RDAP bootstrap file for IPv4 address allocations (test subset)",
+  "publication": "2026-10-01T00:00:00Z",
+  "services": [
+    [["8.0.0.0/8", "23.0.0.0/8"], ["https://rdap.arin.net/registry/", "http://rdap.arin.net/registry/"]],
+    [["193.0.0.0/8"], ["https://rdap.db.ripe.net/"]],
+    [["1.0.0.0/8"], ["https://rdap.apnic.net/"]]
+  ],
+  "version": "1.0"
+}
