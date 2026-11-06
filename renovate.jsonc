@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  // config:recommended includes the Dependency Dashboard issue and monorepo grouping.
+  "extends": ["config:recommended"],
+  "labels": ["dependencies"],
+  // Give new releases a few days to be yanked or patched before we pick them up.
+  "minimumReleaseAge": "3 days",
+  "packageRules": [
+    {
+      // NuGet packages (Directory.Packages.props, central package management).
+      "description": "Group non-major NuGet updates into one PR",
+      "matchManagers": ["nuget"],
+      "matchDatasources": ["nuget"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "NuGet packages (non-major)"
+    },
+    {
+      // Test-only packages can move together, including majors.
+      "description": "Group xUnit packages",
+      "matchDatasources": ["nuget"],
+      "matchPackageNames": ["xunit*"],
+      "groupName": "xUnit"
+    },
+    {
+      // .NET SDK pinned in global.json. The projects target net10.0 (LTS) and are
+      // published with Native AOT, so stay on the 10.0.x SDK line; moving to a new
+      // major is a deliberate change (TargetFramework, AOT, CI images), not a bot PR.
+      "description": ".NET SDK: stay on the 10.0 line",
+      "matchDatasources": ["dotnet-version"],
+      "matchDepNames": ["dotnet-sdk"],
+      "allowedVersions": "<11.0.0",
+      "groupName": ".NET SDK",
+      "minimumReleaseAge": "0 days"
+    },
+    {
+      "description": "Group GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      // Linux release binaries are deliberately built on ubuntu-22.04 so they run on
+      // glibc 2.35+. Don't let Renovate bump runner images in runs-on.
+      "description": "Keep pinned GitHub runner images",
+      "matchDatasources": ["github-runners"],
+      "enabled": false
+    }
+  ]
+}
