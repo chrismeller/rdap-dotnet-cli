@@ -131,8 +131,22 @@ snapshot.
 * Native AOT publishes for `linux-x64`, `linux-arm64` and `win-x64`, each smoke-tested by running
   the real binary against live servers
 
-Pushing a `v*` tag (for example `v0.1.0`) also creates a GitHub release with the archives and a
-`SHA256SUMS` file.
+The AOT build itself lives in the reusable `.github/workflows/build.yml`.
+
+### Releases
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please)
+(`.github/workflows/release.yml`), driven by [Conventional Commits](https://www.conventionalcommits.org/):
+
+* `fix:` bumps the patch version, `feat:` the minor version, and `feat!:` or a `BREAKING CHANGE:`
+  footer the major version (while below 1.0.0, breaking changes bump the minor version instead).
+  `docs:`, `ci:`, `chore:`, `test:` and similar don't trigger a release on their own.
+* On every push to `main`, release-please opens or updates a release PR that bumps the version in
+  `Directory.Build.props` and `.release-please-manifest.json` and updates `CHANGELOG.md`.
+* Merging the release PR creates the `vX.Y.Z` tag and GitHub release; the workflow then builds the
+  three Native AOT archives and attaches them, together with a `SHA256SUMS` file.
+
+To force a specific version, add a `Release-As: 1.2.3` footer to a commit message.
 
 ## License
 
