@@ -1,0 +1,66 @@
+name: Release
+
+# release-please keeps a release PR open that bumps the version and CHANGELOG.md from the
+# conventional commits merged to main. Merging that PR creates the vX.Y.Z tag and GitHub release;
+# this workflow then builds the Native AOT binaries and attaches them to that release.
+#
+# Tags and releases created with GITHUB_TOKEN don't trigger other workflows, so the build is
+# chained here rather than relying on a tag push.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      # Reads release-please-config.json and .release-please-manifest.json.
+      - uses: googleapis/release-please-action@v5
+        id: release
+
+  build:
+    name: Build
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.release-please.outputs.version }}
+
+  upload:
+    name: Attach binaries to release
+    needs: [release-please, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: rdap-*
+          merge-multiple: true
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" * --repo "$GITHUB_REPOSITORY" --clobber

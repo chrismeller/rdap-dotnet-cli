@@ -1,0 +1,88 @@
+name: Build
+
+# Reusable Native AOT build: publishes, smoke-tests and packages the `rdap` binary for every
+# supported RID, uploading each archive as a workflow artifact named rdap-<rid>.
+# Called by ci.yml (every push/PR) and release.yml (when release-please cuts a release).
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version stamped into the binary and the archive names
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    name: ${{ matrix.rid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux binaries are built on 22.04 so they run on glibc 2.35+ (not just the newest distros).
+          - rid: linux-x64
+            os: ubuntu-22.04
+          - rid: linux-arm64
+            os: ubuntu-22.04-arm
+          - rid: win-x64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Install Native AOT prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      - name: Publish (Native AOT)
+        run: >
+          dotnet publish src/Rdap.Cli -c Release -r ${{ matrix.rid }} -o out
+          -p:Version=${{ inputs.version }}
+          -p:RdapRequireBootstrapSnapshot=true
+
+      # Exercise the real AOT binary: trimming/AOT problems only show up here, not in `dotnet test`.
+      - name: Smoke test
+        run: |
+          bin=./out/rdap
+          [[ "$RUNNER_OS" == Windows ]] && bin=./out/rdap.exe
+          ls -la out
+          "$bin" --version
+          retry() { for i in 1 2 3; do "$@" && return 0; sleep $((i * 5)); done; return 1; }
+          retry "$bin" --no-color google.com
+          retry "$bin" --no-color 8.8.8.8
+          retry "$bin" --json AS3333 > /dev/null
+          set +e; "$bin" "rdap-dotnet-cli-smoke-$RANDOM$RANDOM.com"; code=$?; set -e
+          [[ $code -eq 1 ]] || { echo "expected exit 1 for not-found, got $code"; exit 1; }
+
+      - name: Package
+        id: package
+        run: |
+          name="rdap-${{ inputs.version }}-${{ matrix.rid }}"
+          cp README.md LICENSE out/
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            (cd out && 7z a "../$name.zip" rdap.exe README.md LICENSE)
+            echo "file=$name.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar -czf "$name.tar.gz" -C out rdap README.md LICENSE
+            echo "file=$name.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rdap-${{ matrix.rid }}
+          path: ${{ steps.package.outputs.file }}
+          if-no-files-found: error
