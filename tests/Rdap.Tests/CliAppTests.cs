@@ -192,6 +192,72 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(0, await Run(new FakeHandler(), "--version"));
     }
 
+    [Fact]
+    public async Task Single_v_logs_requests_and_bootstrap_to_stderr_only()
+    {
+        var exit = await Run(GoogleHandler(), "google.com", "-v", "--no-follow");
+        var err = _err.ToString();
+
+        Assert.Equal(0, exit);
+        Assert.Contains("bootstrap: dns.json: downloading https://data.iana.org/rdap/dns.json", err, StringComparison.Ordinal);
+        Assert.Contains("http#2: GET https://rdap.verisign.com/com/v1/domain/google.com", err, StringComparison.Ordinal);
+        Assert.Matches(@"http#2: 200 OK in \d+ ms", err);
+        Assert.DoesNotContain("env:", err, StringComparison.Ordinal); // -vv and up
+        Assert.DoesNotContain("> User-Agent", err, StringComparison.Ordinal); // -vvv only
+        Assert.DoesNotContain("http#", _out.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("-vvv")]
+    [InlineData("-v", "-v", "-v")]
+    [InlineData("--verbose", "-vv")]
+    public async Task Triple_v_adds_environment_and_headers(params string[] flags)
+    {
+        var exit = await Run(GoogleHandler(), ["google.com", "--no-follow", .. flags]);
+        var err = _err.ToString();
+
+        Assert.Equal(0, exit);
+        Assert.Contains("env: rdap ", err, StringComparison.Ordinal);
+        Assert.Contains("> User-Agent: rdap-dotnet-cli/", err, StringComparison.Ordinal);
+        Assert.Contains("< Content-Type: application/rdap+json", err, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Verbose_failure_reports_the_exception_chain()
+    {
+        var exit = await Run(new FakeHandler { FailUnknown = true }, "example.com", "--server", "https://rdap.example.test/", "-v");
+        var err = _err.ToString();
+
+        Assert.Equal(3, exit);
+        Assert.Contains("System.Net.Http.HttpRequestException: No route for https://rdap.example.test/domain/example.com", err, StringComparison.Ordinal);
+        Assert.Contains("Run again with -vv", err, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task No_bootstrap_download_never_contacts_iana()
+    {
+        // A stale cache stands in for the embedded snapshot, which builds without network access lack.
+        var path = Path.Combine(_cache.Path, "dns.json");
+        await File.WriteAllTextAsync(path, Fixture.Read("bootstrap-dns.json"), Ct);
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-30));
+        var handler = GoogleHandler();
+
+        var exit = await Run(handler, "google.com", "--no-follow", "--no-bootstrap-download");
+
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain(handler.Requests, u => u.Host == "data.iana.org");
+        Assert.Equal("", _err.ToString());
+    }
+
+    [Fact]
+    public async Task No_bootstrap_download_conflicts_with_refresh()
+    {
+        var exit = await Run(GoogleHandler(), "google.com", "--no-bootstrap-download", "--refresh-bootstrap");
+
+        Assert.Equal(2, exit);
+        Assert.Contains("can't be used together", _err.ToString(), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("2023-12-28T17:24:56-05:00", "2023-12-28 22:24:56 UTC")]
     [InlineData("1997-09-15T07:00:00.000+00:00", "1997-09-15 07:00:00 UTC")]

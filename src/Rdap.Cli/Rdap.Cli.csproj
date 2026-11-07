@@ -8,7 +8,8 @@
 
     <PublishAot>true</PublishAot>
     <OptimizationPreference>Size</OptimizationPreference>
-    <StackTraceSupport>false</StackTraceSupport>
+    <!-- Keeps method names in stack traces (~650 KB) so `-vvv` exception reports are readable. -->
+    <StackTraceSupport>true</StackTraceSupport>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
   </PropertyGroup>

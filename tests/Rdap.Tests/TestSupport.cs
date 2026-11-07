@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using Rdap.Diagnostics;
 
 namespace Rdap.Tests;
 
@@ -84,6 +85,22 @@ internal sealed class TempDirectory : IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+        }
+    }
+}
+
+/// <summary>Collects log messages at every level.</summary>
+internal sealed class ListLogger : IRdapLogger
+{
+    public List<string> Messages { get; } = [];
+
+    public bool IsEnabled(RdapLogLevel level) => true;
+
+    public void Log(RdapLogLevel level, string message, Exception? exception = null)
+    {
+        lock (Messages)
+        {
+            Messages.Add(message);
         }
     }
 }

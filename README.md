@@ -66,10 +66,11 @@ The query type is detected automatically, the way `whois` does it:
 | `-s, --server <url>` | Query this RDAP base URL instead of bootstrapping, like `whois -h`. Example: `rdap -s https://rdap.arin.net/registry/ GOGL`. |
 | `-j, --json` | Print the raw RDAP JSON. When a referral is followed, two JSON documents are printed one after another; `jq` handles that fine. |
 | `--no-follow` | Don't follow the registry's referral to the registrar's RDAP server. |
-| `-v, --verbose` | Also print notices (terms of service, etc.) and links. |
+| `-v, --verbose` | Also print notices (terms of service, etc.) and links, and log each request and bootstrap lookup with timings to stderr. Repeat for more: `-vv` adds DNS answers, connection attempts, proxy, TLS certificate and environment details; `-vvv` adds HTTP headers and full exception details. See [Troubleshooting](#troubleshooting). |
 | `--timeout <s>` | Per-request timeout in seconds (default 15). |
 | `--no-color` | Disable color. Color is also off when output is redirected or `NO_COLOR` is set. |
 | `--refresh-bootstrap` | Re-download the IANA bootstrap files now. |
+| `--no-bootstrap-download` | Never contact IANA; use the cached bootstrap files (even if stale) or the built-in snapshot. Handy when `data.iana.org` is unreachable from your network. |
 
 ### Exit codes
 
@@ -86,6 +87,37 @@ The IANA bootstrap files are cached for 24 hours in `%LOCALAPPDATA%\rdap\cache` 
 and in `$XDG_CACHE_HOME/rdap` (default `~/.cache/rdap`) elsewhere. If IANA can't be reached,
 `rdap` uses a stale cached copy. Failing that, it uses a snapshot embedded in the binary when it
 was built.
+
+### Troubleshooting
+
+If a lookup fails or times out, run it again with `-vv` (or `-vvv` for HTTP headers and full
+exception chains). Diagnostics go to stderr, so `--json` output stays clean. An abridged example:
+
+```text
+$ rdap -vv google.com
+[  0.002] env: rdap 0.2.0 (/usr/local/bin/rdap), .NET 10.0.0, linux-x64
+[  0.002] env: IPv4 available, IPv6 available
+[  0.010] bootstrap: dns.json: downloading https://data.iana.org/rdap/dns.json
+[  0.011] http#1: GET https://data.iana.org/rdap/dns.json
+[  0.011] http#1: proxy: none for this host (direct connection)
+[  0.012] dns: data.iana.org -> 2606:4700::6812:1a4c, 104.18.26.76, ...
+[  0.012] connect: trying [2606:4700::6812:1a4c]:443
+[  0.262] connect: no answer yet from 1 address(es) after 250 ms; also trying 104.18.26.76
+[  0.281] connect: connected to 104.18.26.76:443 in 19 ms
+...
+```
+
+Things to look for:
+
+- **Proxy**: `rdap` honours `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and `NO_PROXY` (and the system
+  proxy on Windows). `-vv` prints the variables it sees and which proxy each request used.
+- **IPv6**: `rdap` races IPv6 and IPv4 connections (Happy Eyeballs), so a broken IPv6 route costs
+  about 250 ms instead of the whole timeout. If you still see IPv6 trouble, setting
+  `DOTNET_SYSTEM_NET_DISABLEIPV6=1` turns IPv6 off entirely.
+- **TLS**: `-vv` shows each server certificate and, if it is rejected, why. On Linux the trusted CAs
+  come from OpenSSL; `SSL_CERT_FILE` and `SSL_CERT_DIR` override where it looks.
+- **IANA unreachable**: `--no-bootstrap-download` skips the bootstrap download and uses the cached
+  copy or the built-in snapshot.
 
 ## Development
 

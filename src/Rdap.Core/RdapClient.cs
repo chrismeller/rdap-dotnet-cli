@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using Rdap.Bootstrap;
+using Rdap.Diagnostics;
 using Rdap.Models;
 using Rdap.Serialization;
 
@@ -23,6 +24,9 @@ public sealed class RdapClient
         _http = http;
         _bootstrap = bootstrap;
     }
+
+    /// <summary>Receives diagnostic detail (server resolution, response parsing).</summary>
+    public IRdapLogger Logger { get; set; } = NullRdapLogger.Instance;
 
     /// <summary>Resolves the base URL of the authoritative server for a query via IANA bootstrap.</summary>
     /// <exception cref="RdapNoServerException">No server is registered for the query.</exception>
@@ -57,6 +61,11 @@ public sealed class RdapClient
                 throw new ArgumentOutOfRangeException(nameof(query));
         }
 
+        if (server is not null)
+        {
+            Logger.Log(RdapLogLevel.Info, $"bootstrap: {query.Type} '{query.Value}' -> {server}");
+        }
+
         return server ?? throw new RdapNoServerException(query.Type switch
         {
             QueryType.Domain or QueryType.Nameserver => $"No RDAP server is registered with IANA for '{query.Value}' (the TLD may not support RDAP).",
@@ -68,7 +77,15 @@ public sealed class RdapClient
     public async Task<RdapResult> QueryAsync(RdapQuery query, Uri? server = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(query);
-        server ??= await ResolveServerAsync(query, cancellationToken);
+        if (server is null)
+        {
+            server = await ResolveServerAsync(query, cancellationToken);
+        }
+        else
+        {
+            Logger.Log(RdapLogLevel.Info, $"using --server {server} (skipping IANA bootstrap)");
+        }
+
         if (!server.AbsoluteUri.EndsWith('/'))
         {
             server = new Uri(server.AbsoluteUri + "/");
@@ -101,6 +118,7 @@ public sealed class RdapClient
         }
         catch (RdapParseException ex)
         {
+            Logger.Log(RdapLogLevel.Info, $"parse: could not interpret the response from {finalUri}", ex);
             return new RdapResult(finalUri, body, null, ex);
         }
     }
