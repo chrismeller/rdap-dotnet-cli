@@ -252,7 +252,7 @@ public class LiveCliTests(LiveFixture live)
 
         Assert.True(exit == 0, error);
         Assert.Matches(@"Range:\s+8\.8\.8\.0 - 8\.8\.8\.255", output);
-        Assert.Contains("downloads disabled, not contacting IANA", error, StringComparison.Ordinal);
+        Assert.Contains("bootstrap: ipv4.json: using cached copy", error, StringComparison.Ordinal);
         Assert.DoesNotContain("bootstrap: ipv4.json: downloading", error, StringComparison.Ordinal);
     }
 
