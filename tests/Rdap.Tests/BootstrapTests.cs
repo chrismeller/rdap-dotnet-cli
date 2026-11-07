@@ -341,9 +341,14 @@ public class BootstrapServiceTests
 }
 
 
-/// <summary>Mutates XDG_CACHE_HOME, so it must not run alongside anything else reading it.</summary>
-[CollectionDefinition(nameof(CacheDirectoryTests), DisableParallelization = true)]
-[Collection(nameof(CacheDirectoryTests))]
+/// <summary>Tests that mutate XDG_CACHE_HOME, so they must not run alongside anything else reading it.</summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class EnvironmentMutationGroup
+{
+    public const string Name = "Environment mutation";
+}
+
+[Collection(EnvironmentMutationGroup.Name)]
 public class CacheDirectoryTests
 {
     [Fact]

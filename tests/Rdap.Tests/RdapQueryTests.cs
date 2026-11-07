@@ -77,6 +77,6 @@ public class RdapQueryTests
     [Theory]
     [InlineData("example\uFF0Ecom")] // fullwidth full stop
     [InlineData("example\uFF61com")] // halfwidth ideographic full stop
-    public void Alternative_full_stops_are_dots(string escaped) =>
-        Assert.Equal("domain/example.com", RdapQuery.Parse(System.Text.RegularExpressions.Regex.Unescape(escaped)).Path);
+    public void Alternative_full_stops_are_dots(string input) =>
+        Assert.Equal("domain/example.com", RdapQuery.Parse(input).Path);
 }
