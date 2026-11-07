@@ -65,6 +65,9 @@ jobs:
           retry "$bin" --no-color google.com
           retry "$bin" --no-color 8.8.8.8
           retry "$bin" --json AS3333 > /dev/null
+          # Diagnostics and the custom connect path must survive trimming too.
+          retry "$bin" -vvv --no-color --no-follow example.com > /dev/null
+          retry "$bin" --no-bootstrap-download --no-follow --no-color google.com > /dev/null
           set +e; "$bin" "rdap-dotnet-cli-smoke-$RANDOM$RANDOM.com"; code=$?; set -e
           [[ $code -eq 1 ]] || { echo "expected exit 1 for not-found, got $code"; exit 1; }
 

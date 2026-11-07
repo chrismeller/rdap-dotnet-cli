@@ -178,4 +178,58 @@ public class BootstrapServiceTests
 
         Assert.False(File.Exists(Path.Combine(temp.Path, "dns.json")));
     }
+
+    [Fact]
+    public async Task Network_disabled_uses_stale_cache_without_downloading_or_warning()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "dns.json");
+        await File.WriteAllTextAsync(path, Fixture.Read("bootstrap-dns.json"), Ct);
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-30));
+        var handler = new FakeHandler().WithBootstrap();
+        using var http = new HttpClient(handler);
+        var service = new BootstrapService(http, temp.Path) { AllowNetwork = false };
+        var warnings = new List<string>();
+        service.Warning += warnings.Add;
+
+        var file = await service.GetFileAsync(BootstrapKind.Dns, Ct);
+
+        Assert.NotEmpty(file.Services);
+        Assert.Empty(handler.Requests);
+        Assert.Empty(warnings);
+    }
+
+    [Fact]
+    public async Task Network_disabled_without_cache_uses_embedded_snapshot_or_explains()
+    {
+        var handler = new FakeHandler().WithBootstrap();
+        using var http = new HttpClient(handler);
+        var service = new BootstrapService(http, cacheDirectory: null) { AllowNetwork = false };
+
+        if (BootstrapService.ReadEmbedded("dns.json") is null)
+        {
+            var ex = await Assert.ThrowsAsync<RdapException>(() => service.GetFileAsync(BootstrapKind.Dns, Ct));
+            Assert.Contains("built-in snapshot", ex.Message, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.NotEmpty((await service.GetFileAsync(BootstrapKind.Dns, Ct)).Services);
+        }
+
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Logger_reports_where_each_file_came_from()
+    {
+        using var temp = new TempDirectory();
+        using var http = new HttpClient(new FakeHandler().WithBootstrap());
+        var log = new ListLogger();
+
+        await new BootstrapService(http, temp.Path) { Logger = log }.GetFileAsync(BootstrapKind.Dns, Ct);
+
+        Assert.Contains(log.Messages, m => m.Contains("downloading https://data.iana.org/rdap/dns.json", StringComparison.Ordinal));
+        Assert.Contains(log.Messages, m => m.Contains("downloaded", StringComparison.Ordinal) && m.Contains(" ms", StringComparison.Ordinal));
+    }
 }
+

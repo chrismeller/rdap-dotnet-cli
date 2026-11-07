@@ -1,9 +1,13 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
 using System.Net;
+using System.Net.Security;
 using System.Reflection;
 using System.Text.Json;
 using Rdap.Bootstrap;
+using Rdap.Diagnostics;
+using Rdap.Net;
 
 namespace Rdap.Cli;
 
@@ -71,7 +75,15 @@ internal sealed class CliApp
         };
         var jsonOption = new Option<bool>("--json", "-j") { Description = "Print the raw RDAP JSON (one document per response) instead of text." };
         var noFollowOption = new Option<bool>("--no-follow") { Description = "Don't follow referrals from the registry to the registrar." };
-        var verboseOption = new Option<bool>("--verbose", "-v") { Description = "Include notices (terms of service) and links." };
+        var verboseOption = new Option<int>("--verbose", "-v")
+        {
+            Description = "Repeat for more detail on stderr. -v: notices, links, and a log of each request and bootstrap " +
+                          "lookup with timings. -vv: also DNS, connection attempts, proxy, TLS, and environment. " +
+                          "-vvv: also HTTP headers and full exception details.",
+            Arity = ArgumentArity.Zero,
+            // -vvv is bundled into -v -v -v; the count of occurrences is the verbosity.
+            CustomParser = result => result.Parent is OptionResult option ? option.IdentifierTokenCount : 0,
+        };
         var timeoutOption = new Option<int>("--timeout")
         {
             Description = "Per-request timeout in seconds.",
@@ -86,11 +98,23 @@ internal sealed class CliApp
         });
         var noColorOption = new Option<bool>("--no-color") { Description = "Disable coloured output." };
         var refreshOption = new Option<bool>("--refresh-bootstrap") { Description = "Re-download the IANA bootstrap files instead of using the cache." };
+        var noDownloadOption = new Option<bool>("--no-bootstrap-download")
+        {
+            Description = "Never download the IANA bootstrap files; use the cached copy (even if stale) or the built-in snapshot.",
+        };
 
         var root = new RootCommand("Look up domain, IP, ASN and entity registration data using RDAP — a modern whois.")
         {
-            queryArgument, typeOption, serverOption, jsonOption, noFollowOption, verboseOption, timeoutOption, noColorOption, refreshOption,
+            queryArgument, typeOption, serverOption, jsonOption, noFollowOption, verboseOption, timeoutOption, noColorOption, refreshOption, noDownloadOption,
         };
+
+        root.Validators.Add(r =>
+        {
+            if (r.GetValue(refreshOption) && r.GetValue(noDownloadOption))
+            {
+                r.AddError("--refresh-bootstrap and --no-bootstrap-download can't be used together.");
+            }
+        });
 
         root.SetAction((parse, ct) => LookupAsync(
             new LookupOptions(
@@ -99,10 +123,11 @@ internal sealed class CliApp
                 Server: parse.GetValue(serverOption),
                 Json: parse.GetValue(jsonOption),
                 Follow: !parse.GetValue(noFollowOption),
-                Verbose: parse.GetValue(verboseOption),
+                Verbosity: parse.GetValue(verboseOption),
                 Timeout: TimeSpan.FromSeconds(parse.GetValue(timeoutOption)),
                 Color: UseColor && !parse.GetValue(noColorOption),
-                RefreshBootstrap: parse.GetValue(refreshOption)),
+                RefreshBootstrap: parse.GetValue(refreshOption),
+                DownloadBootstrap: !parse.GetValue(noDownloadOption)),
             ct));
 
         var result = root.Parse(args);
@@ -122,7 +147,10 @@ internal sealed class CliApp
     }
 
     private sealed record LookupOptions(
-        string Query, string Type, Uri? Server, bool Json, bool Follow, bool Verbose, TimeSpan Timeout, bool Color, bool RefreshBootstrap);
+        string Query, string Type, Uri? Server, bool Json, bool Follow, int Verbosity, TimeSpan Timeout, bool Color, bool RefreshBootstrap, bool DownloadBootstrap)
+    {
+        public bool Verbose => Verbosity > 0;
+    }
 
     private async Task<int> LookupAsync(LookupOptions options, CancellationToken cancellationToken)
     {
@@ -138,13 +166,20 @@ internal sealed class CliApp
             return ExitCodes.UsageError;
         }
 
-        using var http = CreateHttpClient(options.Timeout);
-        var bootstrap = new BootstrapService(http, CacheDirectory ?? BootstrapService.DefaultCacheDirectory())
+        var log = new StderrLogger(_err, options.Verbosity, options.Color);
+        var cacheDirectory = CacheDirectory ?? BootstrapService.DefaultCacheDirectory();
+        EnvironmentReport.Log(log, cacheDirectory, options.Timeout);
+        log.Log(RdapLogLevel.Info, $"query: {query.Type} '{query.Value}' -> {query.Path}");
+
+        using var http = CreateHttpClient(options.Timeout, log);
+        var bootstrap = new BootstrapService(http, cacheDirectory)
         {
             ForceRefresh = options.RefreshBootstrap,
+            AllowNetwork = options.DownloadBootstrap,
+            Logger = log,
         };
         bootstrap.Warning += Warn;
-        var client = new RdapClient(http, bootstrap);
+        var client = new RdapClient(http, bootstrap) { Logger = log };
 
         RdapResult result;
         try
@@ -163,11 +198,13 @@ internal sealed class CliApp
         }
         catch (Exception ex) when (IsNetworkError(ex, cancellationToken))
         {
-            await _err.WriteLineAsync($"rdap: {DescribeNetworkError(ex, options.Timeout)}");
+            log.Log(RdapLogLevel.Info, "lookup failed", ex);
+            await _err.WriteLineAsync($"rdap: {DescribeNetworkError(ex, options.Timeout)}{VerboseHint(options)}");
             return ExitCodes.ServerError;
         }
         catch (RdapException ex)
         {
+            log.Log(RdapLogLevel.Info, "lookup failed", ex);
             await _err.WriteLineAsync($"rdap: {ex.Message}");
             return ExitCodes.ServerError;
         }
@@ -176,6 +213,7 @@ internal sealed class CliApp
 
         if (options.Follow && RdapClient.FindReferral(result) is { } referral)
         {
+            log.Log(RdapLogLevel.Info, $"referral: following {referral}");
             try
             {
                 var referred = await client.GetAsync(referral, cancellationToken);
@@ -184,6 +222,7 @@ internal sealed class CliApp
             catch (Exception ex) when (IsNetworkError(ex, cancellationToken))
             {
                 // The registry answer already printed; a failing registrar shouldn't fail the lookup.
+                log.Log(RdapLogLevel.Info, "referral failed", ex);
                 Warn($"Could not follow referral to {referral}: {DescribeNetworkError(ex, options.Timeout)}");
             }
         }
@@ -219,18 +258,58 @@ internal sealed class CliApp
         }
     }
 
-    private HttpClient CreateHttpClient(TimeSpan timeout)
+    private HttpClient CreateHttpClient(TimeSpan timeout, StderrLogger log)
     {
-        var handler = Handler ?? new SocketsHttpHandler
+        HttpMessageHandler handler = Handler ?? CreateSocketsHandler(log);
+        if (log.IsEnabled(RdapLogLevel.Info))
         {
-            AutomaticDecompression = DecompressionMethods.All,
-            AllowAutoRedirect = true,
-            MaxAutomaticRedirections = 5,
-        };
+            handler = new LoggingHandler(handler, log, Handler is null ? HttpClient.DefaultProxy : null);
+        }
+
+        // Disposing a LoggingHandler disposes the handler it wraps, so only dispose when we created it.
         var http = new HttpClient(handler, disposeHandler: Handler is null) { Timeout = timeout };
         http.DefaultRequestHeaders.UserAgent.ParseAdd($"rdap-dotnet-cli/{Version} (+https://github.com/chrismeller/rdap-dotnet-cli)");
         return http;
     }
+
+    private static SocketsHttpHandler CreateSocketsHandler(StderrLogger log)
+    {
+        var handler = new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.All,
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 5,
+            // Race IPv6 and IPv4 instead of waiting out the whole timeout on an unreachable IPv6 address.
+            ConnectCallback = new HappyEyeballsConnector(log).ConnectAsync,
+        };
+
+        if (log.IsEnabled(RdapLogLevel.Debug))
+        {
+            // Observe the certificate without changing the verdict: only a clean chain is accepted, as by default.
+            handler.SslOptions.RemoteCertificateValidationCallback = (sender, certificate, chain, errors) =>
+            {
+                var host = (sender as SslStream)?.TargetHostName;
+                log.Log(errors == SslPolicyErrors.None ? RdapLogLevel.Debug : RdapLogLevel.Info,
+                    $"tls: {host} presented '{certificate?.Subject}' issued by '{certificate?.Issuer}', " +
+                    $"valid {certificate?.GetEffectiveDateString()} to {certificate?.GetExpirationDateString()}: " +
+                    (errors == SslPolicyErrors.None ? "trusted" : $"REJECTED ({errors})"));
+                if (errors != SslPolicyErrors.None && chain is not null)
+                {
+                    foreach (var status in chain.ChainStatus)
+                    {
+                        log.Log(RdapLogLevel.Info, $"tls: chain status {status.Status}: {status.StatusInformation.Trim()}");
+                    }
+                }
+
+                return errors == SslPolicyErrors.None;
+            };
+        }
+
+        return handler;
+    }
+
+    private static string VerboseHint(LookupOptions options) =>
+        options.Verbosity >= 2 ? "" : " Run again with -vv for connection details.";
 
     private void Warn(string message) =>
         _err.WriteLine(UseColor ? $"{Ansi.Yellow}warning:{Ansi.Reset} {message}" : $"warning: {message}");

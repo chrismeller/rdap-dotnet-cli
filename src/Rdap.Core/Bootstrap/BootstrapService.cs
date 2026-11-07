@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using Rdap.Diagnostics;
+
 namespace Rdap.Bootstrap;
 
 /// <summary>
@@ -32,6 +35,15 @@ public sealed class BootstrapService
 
     /// <summary>When true, the disk cache is ignored for reads and always refreshed from the network.</summary>
     public bool ForceRefresh { get; set; }
+
+    /// <summary>
+    /// When false, the network is never used: files come from the disk cache (even if stale) or the embedded
+    /// snapshot. Useful when data.iana.org is unreachable and every download would only wait out the timeout.
+    /// </summary>
+    public bool AllowNetwork { get; set; } = true;
+
+    /// <summary>Receives diagnostic detail about where each file came from.</summary>
+    public IRdapLogger Logger { get; set; } = NullRdapLogger.Instance;
 
     /// <summary>Diagnostic messages (e.g. falling back to the embedded snapshot).</summary>
     public event Action<string>? Warning;
@@ -96,48 +108,99 @@ public sealed class BootstrapService
         var cachePath = _cacheDirectory is null ? null : Path.Combine(_cacheDirectory, name);
 
         // 1. Fresh cache.
-        if (!ForceRefresh && cachePath is not null && File.Exists(cachePath) &&
-            _time.GetUtcNow() - File.GetLastWriteTimeUtc(cachePath) < _maxAge &&
-            TryParse(await TryReadAsync(cachePath, cancellationToken), out var fresh))
+        if (cachePath is null)
         {
-            return fresh;
+            Logger.Log(RdapLogLevel.Debug, $"bootstrap: {name}: disk cache disabled");
+        }
+        else if (ForceRefresh)
+        {
+            Logger.Log(RdapLogLevel.Debug, $"bootstrap: {name}: ignoring cache {cachePath} (refresh requested)");
+        }
+        else if (!File.Exists(cachePath))
+        {
+            Logger.Log(RdapLogLevel.Debug, $"bootstrap: {name}: no cached copy at {cachePath}");
+        }
+        else
+        {
+            var age = _time.GetUtcNow() - File.GetLastWriteTimeUtc(cachePath);
+            if (age >= _maxAge)
+            {
+                Logger.Log(RdapLogLevel.Debug, $"bootstrap: {name}: cached copy {cachePath} is stale (age {FormatAge(age)}, max {FormatAge(_maxAge)})");
+            }
+            else if (TryParse(await TryReadAsync(cachePath, cancellationToken), out var fresh))
+            {
+                Logger.Log(RdapLogLevel.Info, $"bootstrap: {name}: using cached copy {cachePath} (age {FormatAge(age)}, publication {fresh.Publication ?? "unknown"})");
+                return fresh;
+            }
+            else
+            {
+                Logger.Log(RdapLogLevel.Info, $"bootstrap: {name}: cached copy {cachePath} is unreadable or corrupt; ignoring it");
+            }
         }
 
         // 2. Network.
         string? networkError = null;
-        try
+        if (AllowNetwork)
         {
-            var json = await _http.GetStringAsync(new Uri(_baseUri, name), cancellationToken);
-            var file = BootstrapFile.Parse(json);
-            if (cachePath is not null)
+            var uri = new Uri(_baseUri, name);
+            Logger.Log(RdapLogLevel.Info, $"bootstrap: {name}: downloading {uri}");
+            var sw = Stopwatch.StartNew();
+            try
             {
-                await TryWriteCacheAsync(cachePath, json, cancellationToken);
-            }
+                var json = await _http.GetStringAsync(uri, cancellationToken);
+                var file = BootstrapFile.Parse(json);
+                Logger.Log(RdapLogLevel.Info, $"bootstrap: {name}: downloaded {json.Length:N0} chars in {sw.ElapsedMilliseconds} ms (publication {file.Publication ?? "unknown"})");
+                if (cachePath is not null)
+                {
+                    await TryWriteCacheAsync(cachePath, json, cancellationToken);
+                }
 
-            return file;
+                return file;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or RdapParseException && !cancellationToken.IsCancellationRequested)
+            {
+                Logger.Log(RdapLogLevel.Info, $"bootstrap: {name}: download failed after {sw.ElapsedMilliseconds} ms", ex);
+                networkError = ex.Message;
+            }
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or RdapParseException && !cancellationToken.IsCancellationRequested)
+        else
         {
-            networkError = ex.Message;
+            Logger.Log(RdapLogLevel.Info, $"bootstrap: {name}: downloads disabled, not contacting IANA");
         }
 
         // 3. Stale cache.
         if (cachePath is not null && File.Exists(cachePath) &&
             TryParse(await TryReadAsync(cachePath, cancellationToken), out var stale))
         {
-            Warning?.Invoke($"Could not refresh IANA {name} ({networkError}); using cached copy from {File.GetLastWriteTimeUtc(cachePath):u}.");
+            var written = File.GetLastWriteTimeUtc(cachePath);
+            if (networkError is not null)
+            {
+                Warning?.Invoke($"Could not refresh IANA {name} ({networkError}); using cached copy from {written:u}.");
+            }
+
+            Logger.Log(RdapLogLevel.Info, $"bootstrap: {name}: using stale cached copy {cachePath} from {written:u} (publication {stale.Publication ?? "unknown"})");
             return stale;
         }
 
         // 4. Embedded snapshot.
         if (TryParse(ReadEmbedded(name), out var embedded))
         {
-            Warning?.Invoke($"Could not download IANA {name} ({networkError}); using built-in snapshot.");
+            if (networkError is not null)
+            {
+                Warning?.Invoke($"Could not download IANA {name} ({networkError}); using built-in snapshot.");
+            }
+
+            Logger.Log(RdapLogLevel.Info, $"bootstrap: {name}: using built-in snapshot (publication {embedded.Publication ?? "unknown"})");
             return embedded;
         }
 
-        throw new RdapException($"Could not load the IANA bootstrap registry {name}: {networkError}");
+        throw new RdapException(networkError is not null
+            ? $"Could not load the IANA bootstrap registry {name}: {networkError}"
+            : $"The IANA bootstrap registry {name} isn't cached and this build has no built-in snapshot; allow the download or pass --server.");
     }
+
+    private static string FormatAge(TimeSpan age) =>
+        age.TotalHours >= 1 ? $"{age.TotalHours:0.#}h" : age.TotalMinutes >= 1 ? $"{age.TotalMinutes:0}m" : $"{age.TotalSeconds:0}s";
 
     internal static string? ReadEmbedded(string name)
     {
