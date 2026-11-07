@@ -10,7 +10,7 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
-    <Version Condition="'$(Version)' == ''">0.1.0</Version> <!-- x-release-please-version -->
+    <Version Condition="'$(Version)' == ''">0.2.0</Version> <!-- x-release-please-version -->
     <Authors>Chris Meller</Authors>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/chrismeller/rdap-dotnet-cli</RepositoryUrl>
