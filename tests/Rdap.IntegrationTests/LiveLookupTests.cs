@@ -230,6 +230,33 @@ public class LiveCliTests(LiveFixture live)
     }
 
     [Fact]
+    public async Task Verbose_diagnostics_trace_the_real_connection()
+    {
+        // The production handler: Happy Eyeballs connect plus the -vv TLS observer, against a real registry.
+        var (exit, _, error) = await Run("google.com", "--no-follow", "--no-color", "-vv");
+
+        Assert.True(exit == 0, error);
+        Assert.Matches(@"dns: rdap\.verisign\.com -> ", error);
+        Assert.Matches(@"connect: connected to \S+:443 in \d+ ms", error);
+        Assert.Matches(@"tls: rdap\.verisign\.com presented '.+' issued by '.+', valid .+: trusted", error);
+        Assert.Matches(@"http#\d+: 200 OK", error);
+    }
+
+    [Fact]
+    public async Task No_bootstrap_download_still_resolves()
+    {
+        // Warm the shared cache first, so this doesn't depend on the build having embedded a snapshot.
+        Assert.Equal(0, (await Run("8.8.8.8", "--no-follow")).Exit);
+
+        var (exit, output, error) = await Run("8.8.8.8", "--no-bootstrap-download", "--no-color", "-v");
+
+        Assert.True(exit == 0, error);
+        Assert.Matches(@"Range:\s+8\.8\.8\.0 - 8\.8\.8\.255", output);
+        Assert.Contains("downloads disabled, not contacting IANA", error, StringComparison.Ordinal);
+        Assert.DoesNotContain("bootstrap: ipv4.json: downloading", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Not_found_exit_code()
     {
         var (exit, _, _) = await Run($"rdap-dotnet-cli-{Guid.NewGuid():N}.com");
