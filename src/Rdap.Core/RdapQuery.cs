@@ -75,6 +75,9 @@ public sealed partial record RdapQuery
         };
     }
 
+    /// <summary>The full stop and its UTS #46 equivalents: ideographic, fullwidth and halfwidth ideographic.</summary>
+    private static readonly System.Buffers.SearchValues<char> LabelSeparators = System.Buffers.SearchValues.Create(".。．｡");
+
     private static QueryType Detect(string text)
     {
         if (AsnPattern().IsMatch(text))
@@ -88,7 +91,7 @@ public sealed partial record RdapQuery
         }
 
         // Anything with a dot is a domain; dot-less tokens are entity handles (e.g. GOGL, ABC123-ARIN).
-        return text.Contains('.', StringComparison.Ordinal) || text.Contains('。', StringComparison.Ordinal)
+        return text.AsSpan().IndexOfAny(LabelSeparators) >= 0
             ? QueryType.Domain
             : QueryType.Entity;
     }
