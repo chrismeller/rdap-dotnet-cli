@@ -71,9 +71,12 @@ public sealed class HappyEyeballsConnector
                 throw;
             }
 
-            _log.Log(RdapLogLevel.Debug, addresses.Length == 0
-                ? $"dns: {host} has no addresses ({sw.ElapsedMilliseconds} ms)"
-                : $"dns: {host} -> {string.Join(", ", addresses.Select(a => a.ToString()))} ({sw.ElapsedMilliseconds} ms)");
+            if (_log.IsEnabled(RdapLogLevel.Debug))
+            {
+                _log.Log(RdapLogLevel.Debug, addresses.Length == 0
+                    ? $"dns: {host} has no addresses ({sw.ElapsedMilliseconds} ms)"
+                    : $"dns: {host} -> {string.Join(", ", addresses.Select(a => a.ToString()))} ({sw.ElapsedMilliseconds} ms)");
+            }
         }
 
         if (addresses.Length == 0)

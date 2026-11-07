@@ -8,6 +8,11 @@ namespace Rdap.Cli;
 /// <summary>Logs each HTTP request: URL, proxy, status, timing, and (at trace level) headers.</summary>
 internal sealed class LoggingHandler : DelegatingHandler
 {
+    private static readonly HashSet<string> SensitiveHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie",
+    };
+
     private readonly IRdapLogger _log;
     private readonly IWebProxy? _proxy;
     private int _counter;
@@ -97,7 +102,7 @@ internal sealed class LoggingHandler : DelegatingHandler
     {
         foreach (var (name, values) in headers)
         {
-            var value = name.Equals("Authorization", StringComparison.OrdinalIgnoreCase) || name.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase)
+            var value = SensitiveHeaders.Contains(name)
                 ? "<redacted>"
                 : string.Join(name.Equals("User-Agent", StringComparison.OrdinalIgnoreCase) || name.Equals("Server", StringComparison.OrdinalIgnoreCase) ? " " : ", ", values);
             _log.Log(RdapLogLevel.Trace, $"http#{id}: {direction} {name}: {value}");

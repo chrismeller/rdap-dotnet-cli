@@ -249,6 +249,23 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal("", _err.ToString());
     }
 
+    [Theory]
+    [InlineData("http://user:secret@proxy:3128", "http://***@proxy:3128")]
+    [InlineData("user:secret@proxy:3128", "***@proxy:3128")]
+    [InlineData("proxy:3128", "proxy:3128")]
+    [InlineData("a.test,u:p@b.test", "a.test,***@b.test")]
+    public void Proxy_credentials_are_redacted(string value, string expected) =>
+        Assert.Equal(expected, EnvironmentReport.RedactProxyValue(value));
+
+    [Fact]
+    public async Task No_color_also_applies_to_diagnostics()
+    {
+        await new CliApp(_out, _err) { Handler = GoogleHandler(), CacheDirectory = _cache.Path, UseColor = true }
+            .RunAsync(["google.com", "--no-follow", "-v", "--no-color"], Ct);
+
+        Assert.DoesNotContain("\e[", _err.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task No_bootstrap_download_conflicts_with_refresh()
     {

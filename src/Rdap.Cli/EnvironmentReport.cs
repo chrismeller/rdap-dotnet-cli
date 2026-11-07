@@ -32,7 +32,7 @@ internal static class EnvironmentReport
             if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } value)
             {
                 any = true;
-                log.Log(RdapLogLevel.Debug, $"env: {name}={(name.Contains("PROXY", StringComparison.OrdinalIgnoreCase) && Uri.TryCreate(value, UriKind.Absolute, out var u) ? Redact(u) : value)}");
+                log.Log(RdapLogLevel.Debug, $"env: {name}={(name.Contains("PROXY", StringComparison.OrdinalIgnoreCase) ? RedactProxyValue(value) : value)}");
             }
         }
 
@@ -41,6 +41,24 @@ internal static class EnvironmentReport
             log.Log(RdapLogLevel.Debug, "env: no proxy or certificate environment variables set");
         }
     }
+
+    /// <summary>
+    /// Hides credentials in a proxy setting, with or without a scheme (<c>user:pass@proxy:3128</c> is common),
+    /// and in each entry of a comma-separated list.
+    /// </summary>
+    internal static string RedactProxyValue(string value) =>
+        string.Join(",", value.Split(',').Select(entry =>
+        {
+            var at = entry.LastIndexOf('@');
+            if (at < 0)
+            {
+                return entry;
+            }
+
+            var scheme = entry.IndexOf("://", StringComparison.Ordinal);
+            var start = scheme >= 0 && scheme < at ? scheme + 3 : 0;
+            return entry[..start] + "***" + entry[at..];
+        }));
 
     /// <summary>Hides credentials in a proxy URL.</summary>
     public static string Redact(Uri uri) =>

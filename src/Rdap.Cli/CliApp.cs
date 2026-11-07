@@ -166,7 +166,7 @@ internal sealed class CliApp
             return ExitCodes.UsageError;
         }
 
-        var log = new StderrLogger(_err, options.Verbosity, UseColor);
+        var log = new StderrLogger(_err, options.Verbosity, options.Color);
         var cacheDirectory = CacheDirectory ?? BootstrapService.DefaultCacheDirectory();
         EnvironmentReport.Log(log, cacheDirectory, options.Timeout);
         log.Log(RdapLogLevel.Info, $"query: {query.Type} '{query.Value}' -> {query.Path}");
