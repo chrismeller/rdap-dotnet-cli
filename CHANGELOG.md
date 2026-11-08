@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/chrismeller/rdap-dotnet-cli/compare/v0.2.0...v0.2.1) (2026-11-08)
+
+
+### Bug Fixes
+
+* **core:** detect domains written with fullwidth or halfwidth full stops ([feeab5b](https://github.com/chrismeller/rdap-dotnet-cli/commit/feeab5b5c260fdfb433a7367f4885c95db1fb114))
+
 ## [0.2.0](https://github.com/chrismeller/rdap-dotnet-cli/compare/v0.1.0...v0.2.0) (2026-11-07)
 
 
