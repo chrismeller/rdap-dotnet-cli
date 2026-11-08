@@ -117,4 +117,91 @@ public sealed class HappyEyeballsTests
 
     private static HappyEyeballsConnector Connector(TimeSpan delay, Func<IPEndPoint, CancellationToken, Task<Socket>> connect) =>
         new(null, delay, (_, _) => Task.FromResult(new[] { V6a, V4a }), connect);
+
+    [Fact]
+    public async Task Resolves_host_names_and_logs_the_answer()
+    {
+        using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        var log = new ListLogger();
+        string? resolved = null;
+        var connector = new HappyEyeballsConnector(log, null,
+            (host, _) => { resolved = host; return Task.FromResult(new[] { V4a }); },
+            (_, _) => Task.FromResult(socket));
+
+        Assert.Same(socket, await connector.ConnectAsync("rdap.example.test", 443, Ct));
+        Assert.Equal("rdap.example.test", resolved);
+        Assert.Contains(log.Messages, m => m.StartsWith("dns: rdap.example.test -> 192.0.2.1 (", StringComparison.Ordinal));
+        Assert.Contains(log.Messages, m => m.StartsWith("connect: connected to 192.0.2.1:443", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Host_without_addresses_is_host_not_found()
+    {
+        var log = new ListLogger();
+        var connector = new HappyEyeballsConnector(log, null,
+            (_, _) => Task.FromResult(Array.Empty<IPAddress>()),
+            (_, _) => throw new InvalidOperationException("should not connect"));
+
+        var ex = await Assert.ThrowsAsync<SocketException>(() => connector.ConnectAsync("rdap.example.test", 443, Ct));
+
+        Assert.Equal(SocketError.HostNotFound, ex.SocketErrorCode);
+        Assert.Contains(log.Messages, m => m.StartsWith("dns: rdap.example.test has no addresses", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Dns_failure_is_logged_and_rethrown()
+    {
+        var log = new ListLogger();
+        var failure = new SocketException((int)SocketError.TryAgain);
+        var connector = new HappyEyeballsConnector(log, null,
+            (_, _) => Task.FromException<IPAddress[]>(failure),
+            (_, _) => throw new InvalidOperationException("should not connect"));
+
+        Assert.Same(failure, await Assert.ThrowsAsync<SocketException>(() => connector.ConnectAsync("rdap.example.test", 443, Ct)));
+        Assert.Contains(log.Messages, m => m.StartsWith("dns: resolving rdap.example.test failed after", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Losing_socket_that_connects_late_is_disposed()
+    {
+        var releaseV6 = new TaskCompletionSource();
+        var lateV6 = new Socket(SocketType.Stream, ProtocolType.Tcp); // only its disposal matters
+        using var v4Socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        var connector = Connector(TimeSpan.FromMilliseconds(20), async (ep, _) =>
+        {
+            if (ep.AddressFamily == AddressFamily.InterNetworkV6)
+            {
+                await releaseV6.Task; // ignores cancellation, like a connect that completes just as it loses
+                return lateV6;
+            }
+
+            return v4Socket;
+        });
+
+        Assert.Same(v4Socket, await connector.ConnectAsync("rdap.example.test", 443, Ct));
+        releaseV6.SetResult();
+
+        // Disposal happens in a continuation; poll briefly for it.
+        var deadline = Stopwatch.StartNew();
+        while (lateV6.SafeHandle is { IsClosed: false } && deadline.Elapsed < TimeSpan.FromSeconds(5))
+        {
+            await Task.Delay(10, Ct);
+        }
+
+        Assert.True(lateV6.SafeHandle.IsClosed);
+    }
+
+    [Fact]
+    public async Task Refused_real_connection_surfaces_the_socket_error()
+    {
+        // Grab a free port, then close it so nothing is listening.
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+
+        var ex = await Assert.ThrowsAsync<SocketException>(() => new HappyEyeballsConnector().ConnectAsync("127.0.0.1", port, Ct));
+
+        Assert.Equal(SocketError.ConnectionRefused, ex.SocketErrorCode);
+    }
 }

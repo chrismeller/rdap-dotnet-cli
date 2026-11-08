@@ -131,4 +131,67 @@ public class RdapClientTests
 
         Assert.Null(RdapClient.FindReferral(result));
     }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest, "The server rejected the query as malformed.")]
+    [InlineData(HttpStatusCode.NotImplemented, "The server does not support this kind of query.")]
+    [InlineData(HttpStatusCode.TooManyRequests, "Rate limited by the server.")]
+    [InlineData(HttpStatusCode.ServiceUnavailable, "Server returned HTTP 503 Service Unavailable.")]
+    public async Task Http_errors_have_readable_messages(HttpStatusCode status, string expected)
+    {
+        var handler = new FakeHandler().Json("https://rdap.example.test/domain/example.com", "{}", status);
+        var client = CreateClient(handler, out var http);
+        using (http)
+        {
+            var ex = await Assert.ThrowsAsync<RdapHttpException>(() =>
+                client.QueryAsync(RdapQuery.Parse("example.com"), new Uri("https://rdap.example.test"), Ct));
+
+            Assert.Equal(status, ex.StatusCode);
+            Assert.StartsWith(expected, ex.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task Unallocated_ip_has_no_server()
+    {
+        var client = CreateClient(new FakeHandler().WithBootstrap(), out var http);
+        using (http)
+        {
+            var ex = await Assert.ThrowsAsync<RdapNoServerException>(() => client.QueryAsync(RdapQuery.Parse("100.64.0.1"), cancellationToken: Ct));
+
+            Assert.Equal("No RDAP server is registered with IANA for '100.64.0.1'.", ex.Message);
+        }
+    }
+
+    [Theory]
+    [InlineData("""{"rel":"related","type":"text/html","href":"https://registrar.test/domain/example.com"}""")]          // not RDAP
+    [InlineData("""{"rel":"alternate","type":"application/rdap+json","href":"https://registrar.test/domain/example.com"}""")] // wrong rel
+    [InlineData("""{"rel":"related","href":"https://registrar.test/whois?q=example.com"}""")]                              // untyped, not a domain path
+    [InlineData("""{"rel":"related","href":"ftp://registrar.test/domain/example.com"}""")]                                 // not http(s)
+    [InlineData("""{"rel":"related","href":"/domain/example.com"}""")]                                                     // relative
+    public void Non_referral_links_are_ignored(string link)
+    {
+        var json = $$"""{"objectClassName":"domain","ldhName":"example.com","links":[{{link}}]}""";
+        var result = new RdapResult(new Uri("https://rdap.example.test/domain/example.com"), json, Serialization.RdapResponseParser.Parse(json), null);
+
+        Assert.Null(RdapClient.FindReferral(result));
+    }
+
+    [Fact]
+    public void Untyped_related_domain_link_is_a_referral()
+    {
+        var json = """{"objectClassName":"domain","ldhName":"example.com","links":[{"rel":"related","href":"https://registrar.test/rdap/domain/example.com"}]}""";
+        var result = new RdapResult(new Uri("https://rdap.example.test/domain/example.com"), json, Serialization.RdapResponseParser.Parse(json), null);
+
+        Assert.Equal(new Uri("https://registrar.test/rdap/domain/example.com"), RdapClient.FindReferral(result));
+    }
+
+    [Fact]
+    public void Only_domains_have_referrals()
+    {
+        var json = Fixture.Read("ip-arin-8.8.8.8.json");
+        var result = new RdapResult(new Uri("https://rdap.arin.net/registry/ip/8.8.8.8"), json, Serialization.RdapResponseParser.Parse(json), null);
+
+        Assert.Null(RdapClient.FindReferral(result));
+    }
 }

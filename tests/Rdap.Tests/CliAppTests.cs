@@ -275,6 +275,94 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("can't be used together", _err.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Colour_applies_to_output_warnings_and_diagnostics()
+    {
+        var handler = GoogleHandler();
+        handler.Respond("https://rdap.markmonitor.com/rdap/domain/GOOGLE.COM", () => throw new HttpRequestException("registrar down"));
+
+        var exit = await new CliApp(_out, _err) { Handler = handler, CacheDirectory = _cache.Path, UseColor = true }
+            .RunAsync(["google.com", "-v"], Ct);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("\e[1m\e[33m# Source:", _out.ToString(), StringComparison.Ordinal);
+        Assert.Contains("\e[36mDomain Name:", _out.ToString(), StringComparison.Ordinal);
+        Assert.Contains("\e[33mwarning:\e[0m Could not follow referral", _err.ToString(), StringComparison.Ordinal);
+        Assert.Contains("\e[2m[", _err.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Timeout_is_reported_with_the_configured_limit()
+    {
+        var handler = new FakeHandler().Respond("https://rdap.example.test/domain/example.com", () => throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"));
+
+        var exit = await Run(handler, "example.com", "--server", "https://rdap.example.test/", "--timeout", "7");
+
+        Assert.Equal(3, exit);
+        Assert.Contains("rdap: Request timed out after 7s. Run again with -vv for connection details.", _err.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Network_error_includes_the_inner_cause_and_drops_the_hint_at_vv()
+    {
+        var cause = new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionRefused);
+        var handler = new FakeHandler().Respond("https://rdap.example.test/domain/example.com",
+            () => throw new HttpRequestException("Connection failed.", cause));
+
+        var exit = await Run(handler, "example.com", "--server", "https://rdap.example.test/", "-vv");
+
+        Assert.Equal(3, exit);
+        Assert.EndsWith($"rdap: Connection failed. {cause.Message}", _err.ToString().TrimEnd(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Run again with -vv", _err.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Json_mode_passes_non_json_bodies_through_unchanged()
+    {
+        var handler = new FakeHandler().Json("https://rdap.example.test/domain/example.com", "<html>not rdap</html>");
+
+        var exit = await Run(handler, "example.com", "--server", "https://rdap.example.test/", "--json");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("<html>not rdap</html>", _out.ToString().Trim());
+    }
+
+    [Fact]
+    public async Task Invalid_server_url_is_a_usage_error()
+    {
+        var exit = await Run(new FakeHandler(), "example.com", "--server", "ftp://rdap.example.test/");
+
+        Assert.Equal(2, exit);
+        Assert.Contains("is not an absolute http(s) URL", _err.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Non_positive_timeout_is_a_usage_error()
+    {
+        var exit = await Run(new FakeHandler(), "example.com", "--timeout", "0");
+
+        Assert.Equal(2, exit);
+        Assert.Contains("--timeout must be a positive number", _err.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Real_http_stack_connects_through_happy_eyeballs()
+    {
+        // No injected handler: exercises the production SocketsHttpHandler + HappyEyeballsConnector against a local server.
+        using var server = await LocalRdapServer.StartAsync(Fixture.Read("domain-verisign-google.json"), Ct);
+
+        var exit = await new CliApp(_out, _err) { CacheDirectory = _cache.Path }
+            .RunAsync(["google.com", "--server", server.BaseUrl, "--no-follow", "-vv"], Ct);
+        var err = _err.ToString();
+
+        Assert.True(exit == 0, err);
+        Assert.Matches(@"Domain Name:\s+GOOGLE\.COM", _out.ToString());
+        Assert.Contains($"connect: connected to 127.0.0.1:{server.Port}", err, StringComparison.Ordinal);
+        Assert.Contains("http#1: proxy:", err, StringComparison.Ordinal);
+        Assert.Contains("env: timeout 15s per request", err, StringComparison.Ordinal);
+        Assert.Equal("/domain/google.com", await server.RequestPath);
+    }
+
     [Theory]
     [InlineData("2023-12-28T17:24:56-05:00", "2023-12-28 22:24:56 UTC")]
     [InlineData("1997-09-15T07:00:00.000+00:00", "1997-09-15 07:00:00 UTC")]

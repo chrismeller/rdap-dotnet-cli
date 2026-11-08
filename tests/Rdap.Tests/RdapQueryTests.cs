@@ -61,4 +61,22 @@ public class RdapQueryTests
     [InlineData("2001:db8::/129")]
     public void Rejects_invalid_ip_when_forced(string input) =>
         Assert.Throws<ArgumentException>(() => RdapQuery.Parse(input, QueryType.Ip));
+
+    [Fact]
+    public void Ipv6_zone_ids_are_dropped() =>
+        Assert.Equal("ip/fe80::1", RdapQuery.Parse("fe80::1%3").Path);
+
+    [Fact]
+    public void Overlong_domain_labels_are_rejected()
+    {
+        var ex = Assert.Throws<ArgumentException>(() => RdapQuery.Parse(new string('a', 64) + ".com"));
+
+        Assert.Contains("is not a valid domain name", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("example\uFF0Ecom")] // fullwidth full stop
+    [InlineData("example\uFF61com")] // halfwidth ideographic full stop
+    public void Alternative_full_stops_are_dots(string input) =>
+        Assert.Equal("domain/example.com", RdapQuery.Parse(input).Path);
 }

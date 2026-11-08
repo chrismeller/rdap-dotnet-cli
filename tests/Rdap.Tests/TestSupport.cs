@@ -104,3 +104,57 @@ internal sealed class ListLogger : IRdapLogger
         }
     }
 }
+
+/// <summary>
+/// A minimal HTTP/1.1 server on 127.0.0.1 that answers one request with a fixed RDAP body,
+/// so the real <see cref="SocketsHttpHandler"/> stack can be tested without the internet.
+/// </summary>
+internal sealed class LocalRdapServer : IDisposable
+{
+    private readonly System.Net.Sockets.TcpListener _listener;
+    private readonly TaskCompletionSource<string> _path = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private LocalRdapServer(System.Net.Sockets.TcpListener listener) => _listener = listener;
+
+    public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
+
+    public string BaseUrl => $"http://127.0.0.1:{Port}/";
+
+    /// <summary>The path of the request the server answered.</summary>
+    public Task<string> RequestPath => _path.Task;
+
+    public static Task<LocalRdapServer> StartAsync(string body, CancellationToken cancellationToken)
+    {
+        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var server = new LocalRdapServer(listener);
+        _ = server.ServeAsync(body, cancellationToken);
+        return Task.FromResult(server);
+    }
+
+    private async Task ServeAsync(string body, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var client = await _listener.AcceptTcpClientAsync(cancellationToken);
+            await using var stream = client.GetStream();
+            using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
+            var requestLine = await reader.ReadLineAsync(cancellationToken) ?? "";
+            while (!string.IsNullOrEmpty(await reader.ReadLineAsync(cancellationToken)))
+            {
+            }
+
+            var bytes = Encoding.UTF8.GetBytes(body);
+            var head = $"HTTP/1.1 200 OK\r\nContent-Type: application/rdap+json\r\nContent-Length: {bytes.Length}\r\nConnection: close\r\n\r\n";
+            await stream.WriteAsync(Encoding.ASCII.GetBytes(head), cancellationToken);
+            await stream.WriteAsync(bytes, cancellationToken);
+            _path.TrySetResult(requestLine.Split(' ') is [_, var path, ..] ? path : requestLine);
+        }
+        catch (Exception ex)
+        {
+            _path.TrySetException(ex);
+        }
+    }
+
+    public void Dispose() => _listener.Stop();
+}

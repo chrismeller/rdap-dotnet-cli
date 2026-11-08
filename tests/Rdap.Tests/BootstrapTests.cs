@@ -63,6 +63,39 @@ public class BootstrapRegistryTests
     [InlineData("TRAILING-")]
     [InlineData("X-UNKNOWNTAG")]
     public void Entity_without_known_tag_has_no_server(string handle) => Assert.Null(Registry.FindEntityServer(handle));
+
+    [Fact]
+    public void Asn_entries_with_an_unparseable_range_end_are_skipped()
+    {
+        var registry = new BootstrapRegistry(null, null, null, BootstrapFile.Parse("""
+            {"services": [
+              [["100-oops"], ["https://rdap.bad.test/"]],
+              [["100-200"], ["https://rdap.good.test/"]]
+            ]}
+            """), null);
+
+        Assert.Equal(new Uri("https://rdap.good.test/"), registry.FindAsnServer(150));
+    }
+
+    [Fact]
+    public void Services_without_an_http_url_are_ignored()
+    {
+        var registry = new BootstrapRegistry(BootstrapFile.Parse("""{"services": [[["test"], ["ftp://rdap.example.test/"]]]}"""), null, null, null, null);
+
+        Assert.Null(registry.FindDomainServer("example.test"));
+    }
+
+    [Fact]
+    public void Missing_files_find_nothing()
+    {
+        var empty = new BootstrapRegistry(null, null, null, null, null);
+
+        Assert.Null(empty.FindDomainServer("example.com"));
+        Assert.Null(empty.FindIpServer(IPAddress.Parse("8.8.8.8")));
+        Assert.Null(empty.FindIpServer(IPAddress.Parse("2001:db8::1")));
+        Assert.Null(empty.FindAsnServer(15169));
+        Assert.Null(empty.FindEntityServer("X-ARIN"));
+    }
 }
 
 public class BootstrapServiceTests
@@ -231,5 +264,120 @@ public class BootstrapServiceTests
         Assert.Contains(log.Messages, m => m.Contains("downloading https://data.iana.org/rdap/dns.json", StringComparison.Ordinal));
         Assert.Contains(log.Messages, m => m.Contains("downloaded", StringComparison.Ordinal) && m.Contains(" ms", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public async Task Corrupt_fresh_cache_is_ignored_and_replaced()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "dns.json");
+        await File.WriteAllTextAsync(path, "{ truncated", Ct);
+        var handler = new FakeHandler().WithBootstrap();
+        using var http = new HttpClient(handler);
+        var log = new ListLogger();
+
+        var file = await new BootstrapService(http, temp.Path) { Logger = log }.GetFileAsync(BootstrapKind.Dns, Ct);
+
+        Assert.NotEmpty(file.Services);
+        Assert.Single(handler.Requests);
+        Assert.Contains(log.Messages, m => m.Contains("unreadable or corrupt", StringComparison.Ordinal));
+        Assert.NotEmpty(BootstrapFile.Parse(await File.ReadAllTextAsync(path, Ct)).Services);
+    }
+
+    [Fact]
+    public async Task Unwritable_cache_warns_but_still_returns_the_download()
+    {
+        using var temp = new TempDirectory();
+        // A file where the cache directory should be makes Directory.CreateDirectory fail.
+        var blocked = Path.Combine(temp.Path, "not-a-directory");
+        await File.WriteAllTextAsync(blocked, "", Ct);
+        using var http = new HttpClient(new FakeHandler().WithBootstrap());
+        var service = new BootstrapService(http, blocked);
+        var warnings = new List<string>();
+        service.Warning += warnings.Add;
+
+        var file = await service.GetFileAsync(BootstrapKind.Dns, Ct);
+
+        Assert.NotEmpty(file.Services);
+        Assert.Contains(warnings, w => w.StartsWith("Could not write bootstrap cache", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Each_file_is_loaded_once_per_service()
+    {
+        var handler = new FakeHandler().WithBootstrap();
+        using var http = new HttpClient(handler);
+        var service = new BootstrapService(http, cacheDirectory: null);
+
+        var first = await service.GetFileAsync(BootstrapKind.Asn, Ct);
+        var second = await service.GetFileAsync(BootstrapKind.Asn, Ct);
+
+        Assert.Same(first, second);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Registry_contains_only_the_requested_files()
+    {
+        var handler = new FakeHandler().WithBootstrap();
+        using var http = new HttpClient(handler);
+
+        var registry = await new BootstrapService(http, cacheDirectory: null).GetRegistryAsync([BootstrapKind.Asn], Ct);
+
+        Assert.NotNull(registry.FindAsnServer(15169));
+        Assert.Null(registry.FindDomainServer("google.com"));
+        Assert.Equal(["https://data.iana.org/rdap/asn.json"], handler.Requests.Select(u => u.AbsoluteUri));
+    }
+
+    [Fact]
+    public void File_names_match_iana()
+    {
+        Assert.Equal("dns.json", BootstrapService.FileName(BootstrapKind.Dns));
+        Assert.Equal("ipv4.json", BootstrapService.FileName(BootstrapKind.Ipv4));
+        Assert.Equal("ipv6.json", BootstrapService.FileName(BootstrapKind.Ipv6));
+        Assert.Equal("asn.json", BootstrapService.FileName(BootstrapKind.Asn));
+        Assert.Equal("object-tags.json", BootstrapService.FileName(BootstrapKind.ObjectTags));
+        Assert.Throws<ArgumentOutOfRangeException>(() => BootstrapService.FileName((BootstrapKind)99));
+    }
 }
 
+
+/// <summary>Tests that mutate XDG_CACHE_HOME, so they must not run alongside anything else reading it.</summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class EnvironmentMutationGroup
+{
+    public const string Name = "Environment mutation";
+}
+
+[Collection(EnvironmentMutationGroup.Name)]
+public class CacheDirectoryTests
+{
+    [Fact]
+    public void Default_cache_directory_follows_the_platform_convention()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var expected = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "rdap", "cache");
+            Assert.Equal(expected, BootstrapService.DefaultCacheDirectory());
+            return;
+        }
+
+        var original = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("XDG_CACHE_HOME", "/srv/xdg-cache");
+            Assert.Equal("/srv/xdg-cache/rdap", BootstrapService.DefaultCacheDirectory());
+
+            // The XDG spec says relative paths are invalid and must be ignored.
+            var home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "rdap");
+            Environment.SetEnvironmentVariable("XDG_CACHE_HOME", "relative/cache");
+            Assert.Equal(home, BootstrapService.DefaultCacheDirectory());
+
+            Environment.SetEnvironmentVariable("XDG_CACHE_HOME", null);
+            Assert.Equal(home, BootstrapService.DefaultCacheDirectory());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XDG_CACHE_HOME", original);
+        }
+    }
+}
